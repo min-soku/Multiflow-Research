@@ -45,7 +45,7 @@ class BLIPVQA(nn.Module):
         # question = self.tokenizer(question, padding='longest', truncation=True, max_length=35, 
         #                           return_tensors="pt").to(image.device)
 
-        # Question 전처리 : Tokenize된 질문 텍스트의 첫 번째 시작 token을 enc_token_id로 교체 -> 질문의 시작을 특수한 Token으로 명시하기 위한 전략
+        # Question 전처리 : Tokenize된 Question 텍스트의 첫 번째 시작 token을 enc_token_id로 교체 -> 질문의 시작을 특수한 Token으로 명시하기 위한 전략
         question.input_ids[:,0] = self.tokenizer.enc_token_id
         
         if train:  # Train 모드가 True일 때           
@@ -54,7 +54,7 @@ class BLIPVQA(nn.Module):
             weights: weight for each answer
             '''                     
             # answer = self.tokenizer(answer, padding='longest', return_tensors="pt").to(image.device) 
-            # Answer 전처리 : Tokenize된 정답 텍스트의 첫 번째 시작 token을 bos_token_id로 교체 -> 정답 시퀀스의 시작점임을 명시하기 위한 전략
+            # Answer 전처리 : Tokenize된 Answer 텍스트의 첫 번째 시작 token을 bos_token_id로 교체 -> 정답 시퀀스의 시작점임을 명시하기 위한 전략
             answer.input_ids[:,0] = self.tokenizer.bos_token_id
             # 패딩 token의 위치는 학습 시에 loss에 반영하지 않기 위해 -100으로 설정(Pytorch의 CELoss에서는 -100은 손실 계산에서 제외함)
             answer_targets = answer.input_ids.masked_fill(answer.input_ids == self.tokenizer.pad_token_id, -100)      
@@ -71,8 +71,8 @@ class BLIPVQA(nn.Module):
             question_atts = []  
             # decoder에 답변 후보와 질문을 줄 때, 한 질문에 대해 n개 답변 후보가 있을 때, 한 번 계산된 질문 인코딩을 n번 복제해 “질문–답변” 쌍끼리 매핑
 
-            for b, n in enumerate(k): # Batch 내 각 질문의 개수(b)와 각 질문에 맞는 답변의 개수(n)
-                question_states += [question_output.last_hidden_state[b]]*n # b개 질문에 대해 각 질문에 대한 인코딩 결과를 답변 개수만큼 복제해서 리스트에 추가 
+            for b, n in enumerate(k): # Batch 내 각 질문의 개수(b)와 각 질문에 맞는 답변의 개수(n) -> EarthVQA는 1질문-1정답임
+                question_states += [question_output.last_hidden_state[b]]*n # b(1)개 질문에 대해 각 질문에 대한 인코딩 결과를 답변 개수 n(1개)만큼 복제해서 리스트에 추가 
                 question_atts += [question.attention_mask[b]]*n # 각 질문에 대한 답변 개수 만큼 어텐션 마스크 리스트에 복제              
             question_states = torch.stack(question_states,0) # 리스트에 있는 모든 텐서를 하나의 텐서로 합친다
             question_atts = torch.stack(question_atts,0)   # 리스트에 있는 모든 텐서를 하나의 텐서로 합친다
@@ -142,7 +142,7 @@ class BLIPVQA(nn.Module):
             
             elif inference=='rank': # 미리 주어진 후보 답변들 중에서 질문과 가장 잘 맞는 답변을 평가하고 선택하는 과정
                 max_ids = self.rank_answer(question_output.last_hidden_state, question.attention_mask, 
-                                           answer.input_ids, answer.attention_mask, k_test) 
+                                           answer.input_ids, answer.attention_mask, k_test) # 상위 k_test개만큼의 답변에 대해 평가
                 return max_ids # 가장 높은 점수를 받은 답변 정보를 반환한다.
  
                 
@@ -151,8 +151,10 @@ class BLIPVQA(nn.Module):
         
         num_ques = question_states.size(0) # Batch 내 질문 개수
         start_ids = answer_ids[0,0].repeat(num_ques,1) # 전처리한 answer의 bos token을 가져와 각 question에 대해 bos token을 복제하여 텐서를 만듦
+        # 후보 정답 집합에서 첫 토큰(BOS 토큰)을 각 질문마다 반복해서 준비(모든 질문에 대해 ‘시작’ 버튼을 누른다고 생각)
         
         # bos token을 입력으로 디코더를 실행하여, 각 질문에 대한 output 출력
+        # 질문마다 bos token(시작 버튼)을 넣어 각 질문에 대한 예측 결과를 얻는다
         start_output = self.text_decoder(start_ids, 
                                          encoder_hidden_states = question_states,
                                          encoder_attention_mask = question_atts,                                      
@@ -164,8 +166,8 @@ class BLIPVQA(nn.Module):
         # topk_ids: [num_question, k]        
         answer_first_token = answer_ids[:,1] # 각 후보 답변들의 두 번째 토큰(bos token다음에 오늘 실제 첫 단어)를 가져온다.
 
-        # decoder가 각 질문에 대해 디코더가 예측한 모든 단어의 확률 중에서 후보 답변의 첫 토큰에 해당하는 위치의 확률만 추출
-        # 후보 답변들이 첫 토큰에서 얼마나 유망한지를 평가할 수 있게 된다.
+        # decoder가 각 질문에 대해 후보 답변들 중 어떤 단어가 가장 가능성이 높은지 확률로 계산한다.
+        # 후보 답변들이 첫 토큰(bos_token)에서 얼마나 유망한지를 평가할 수 있게 된다.
         prob_first_token = F.softmax(logits,dim=1).index_select(dim=1, index=answer_first_token) 
         topk_probs, topk_ids = prob_first_token.topk(k,dim=1) #각 질문에 대해 상위 k개의 후보를 선택하고, 이 후보들의 인덱스를 기록
         

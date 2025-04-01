@@ -27,7 +27,7 @@ vit_ckpt_layer: 0
 
 image_res: 384
 max_tokens: 35
-k_test: 32 #128
+k_test: 32 #128 -> rank()에서 상위 k_test개의 답변에 대해서 CEloss를 계산해 추론함(k_test가 결과에 어떤 영향? 클수록 많은 추론 후보를 고려하나, 계산 비용도 증가)
 inference: 'rank' # generate에서의 성능은??확인해보기
 
 # optimization config
@@ -36,6 +36,6 @@ optimizer: {init_lr: 2e-5, weight_decay: 0.05, min_lr: 0}
 scheduler: {epochs: 10, num_warmup_steps: 0, sched: cosine}
 
 wandb_data:
-  name: mask_65
+  name: mask_75
   project: VQA_EarthVQA_epoch_10
-  tags: [mask_65]
+  tags: [mask_75]

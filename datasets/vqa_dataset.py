@@ -26,7 +26,8 @@ from transformers import BertTokenizer, RobertaTokenizer
 #         n.append(len(answer))
 #     # batch 반환 -> image는 stack으로 weight는 tensor로, question, answer는 list 형태 그대로 반환됨
 #     return torch.stack(image_list, dim=0), question_list, answer_list, torch.Tensor(weight_list), n
-def vqa_collate_fn(batch):
+
+def vqa_collate_fn(batch): # 입력된 train dataset의 batch의 개별 샘플을 하나의 batch로 묶어주는 함수
     image_list, question_list, answer_list, weight_list, n_list = [], [], [], [], []
 
     for (image, question, answers, weights) in batch:
@@ -43,13 +44,13 @@ def vqa_collate_fn(batch):
             else:
                 flattened_answers.append(ans)
 
-        image_list.append(image)
+        image_list.append(image) # 입력된 batch내 image를 하나로 묶음
         question_list.append(question)
         # flattened_answers는 문자열들의 리스트가 됨 -> answer_list에 합치기
         answer_list.extend(flattened_answers)
 
         weight_list += weights
-        n_list.append(len(flattened_answers))
+        n_list.append(len(flattened_answers)) # batch별로 정답 개수
 
     return torch.stack(image_list, dim=0), question_list, answer_list, torch.Tensor(weight_list), n_list
 

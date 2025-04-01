@@ -35,13 +35,6 @@ def train(model, data_loader, optimizer, tokenizer, epoch, scheduler, fabric: L.
     
     losses, steps = [], 0 # step별 loss 저장할 list, train step 카운터 선언
     for i, (image, question, answer, weights, n) in enumerate(data_loader): # dataloader가 Batch별로 넘겨주며 반복문 실행(vqa_collate_fn()실행)
-        if debug_mode:
-            print(f"[Debug] Batch {i}/{len(data_loader)}")
-            print("[Debug] image size:", image.size())  # e.g. [batch_size, C, H, W]
-            print("[Debug] question (first 2):", question[:2])
-            print("[Debug] answer (first 2):", answer[:2])
-            print("[Debug] weights (first 10):", weights[:10])
-            print("[Debug] n (first 10):", n[:10])
 
         if debug_mode and steps == 10: break
             
@@ -51,28 +44,16 @@ def train(model, data_loader, optimizer, tokenizer, epoch, scheduler, fabric: L.
         is_accumulating = not (((i + 1) % config['grad_acc_steps'] == 0) or ((i + 1) == len(data_loader)))
         with fabric.no_backward_sync(model, enabled=is_accumulating): # is_accumulating이 True인 경우 동기화 X -> forwarding을 통해 loss만 구함
             # tokenize both question and answer
+            # tokenizing에서 전처리되면서 단어 토큰과 패딩을 구분하기 위한 attentionmask도 함께 생성된다.
+
             question_input = tokenizer( # 질문 리스트 Tokenizing, longest한 길이에 맞춰 padding 추가하고, max_length보다 길면 자름
                 question, padding='longest', truncation=True, max_length=config['max_tokens'], return_tensors="pt"
             ).to(fabric.device)
-
-            if debug_mode:
-                # question는 어차피 list[str] (?)
-                print("[Debug] question sample:", question[:2])
-                question_input_debug = tokenizer(question[:2], padding='longest', truncation=True, max_length=config['max_tokens'], return_tensors="pt")
-                print("[Debug] question_input_debug['input_ids'] shape:", question_input_debug["input_ids"].shape)
-                print("[Debug] question_input_debug tokens:", question_input_debug["input_ids"])
-                # 실제 batch 토큰 shape
-                print("[Debug] question_input['input_ids'].shape:", question_input["input_ids"].shape)
-                print("[Debug] question_input['attention_mask'].shape:", question_input["attention_mask"].shape)
 
             answer_input = tokenizer( # 정답 리스트 Tokenizing
                 answer, padding='longest', return_tensors="pt"
             ).to(fabric.device)
 
-            if debug_mode:
-                print("[Debug] answer (first 2):", answer[:2])
-                print("[Debug] answer_input['input_ids'].shape:", answer_input["input_ids"].shape)
-                print("[Debug] answer_input['attention_mask'].shape:", answer_input["attention_mask"].shape)
             # forward the model and scale the loss according to grad acc steps
             # Tokenizing되어 전처리된 질문, 정답 입력값은 model의 forward연산에 사용됨
             loss = model(image, question_input, answer_input, train=True, k=n, weights=weights) # blip_vqa.py의 forward()함수 호출
@@ -161,7 +142,7 @@ def main(args, config):
     # create the datasets
     # 데이터셋 불러옴
     print("Combining VQA2.0 [Train and Val] and VisualGenome QA Datasets.")
-    print("[Debug] vqa.py : Dataset 불러옴 -> vqa_dataset.py의 init()함수 호출")
+    print("[Debug] vqa.py : Dataset 불러옴 -> datasets/init.py create_data함수 호출")
     train_dataset, val_dataset, vqa_test_dataset = create_dataset('vqa', config)
     
     # create the dataloaders, samplers and set them up
@@ -214,7 +195,7 @@ def main(args, config):
         tokenizer = model.tokenizer
 
         # evaluation fn
-        #training 후 evaluation할 함수 지정 -> evaltools/itr_utils.py의 blip_evaluation 함수
+        #training 후 evaluation할 함수 지정 -> evaltools/vqa/vqaEval.py의 blip_evaluation 함수
         evaluation = blip_vqa_evaluation
     else:
         raise NotImplementedError(f"Model {args.model} not supported.")
@@ -329,7 +310,7 @@ def main(args, config):
 
     # after training, evaluate on the test-dev partition; the dumped file will be tested on the official evalai server
     print("Finished training. Starting evaluation on the test-dev partition.")
-    # Training이 모두 끝난 뒤 모델의 성능을 평가함 -> evaltools/itr_utils.py의 blip_evaluation 함수
+    # Training이 모두 끝난 뒤 모델의 성능을 평가함 ->evaltools/vqa/vqa_utils.py의 blip_evaluation 함수
     evaluation(args.result_dir, model, test_loader, tokenizer, fabric, config, split="test", debug_mode=args.debug)
     fabric.barrier() 
 

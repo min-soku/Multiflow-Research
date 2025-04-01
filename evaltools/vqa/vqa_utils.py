@@ -39,6 +39,7 @@ def blip_evaluation(output_dir, model, data_loader, tokenizer, fabric, config, s
         # NOTE: the code for answer generation is not tested, 
         # in the main paper VQA was performed using rank-based inference
         elif config['inference'] == 'generate':
+            print("[Debug] vqa.utils.py : blip_evalation()함수 Inference -> generation 수행")
             question_input = tokenizer(question, padding='longest', return_tensors="pt").to(device)  
             answers = model(image, question_input, train=False, inference='generate') 
             for answer, ques_id in zip(answers, question_id):
@@ -47,6 +48,7 @@ def blip_evaluation(output_dir, model, data_loader, tokenizer, fabric, config, s
             computed += 1        
             
         elif config['inference'] == 'rank':
+            print("[Debug] vqa.utils.py : blip_evalation()함수 Inference -> rank 수행")
             question_input = tokenizer(question, padding='longest', return_tensors="pt").to(device)  
             answer_ids = model(image, question_input, answer_candidates, train=False, inference='rank', k_test=config['k_test'])
             for ques_id, answer_id in zip(question_id, answer_ids):
