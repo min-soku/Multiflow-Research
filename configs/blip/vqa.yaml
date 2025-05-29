@@ -19,16 +19,16 @@ pretrained: ''
 
 # size of vit model; base or large
 vit: 'base'
-batch_size_target: 256
-batch_size_test: 64
-batch_size_train: 16
+batch_size_target: 128 #256
+batch_size_test: 16
+batch_size_train: 16 #64
 vit_grad_ckpt: False
 vit_ckpt_layer: 0
 
 image_res: 384
 max_tokens: 35
-k_test: 32 #128 -> rank()에서 상위 k_test개의 답변에 대해서 CEloss를 계산해 추론함(k_test가 결과에 어떤 영향? 클수록 많은 추론 후보를 고려하나, 계산 비용도 증가)
-inference: 'rank' # generate에서의 성능은??확인해보기
+k_test: 32 #128-> rank()에서 상위 k_test개의 답변에 대해서 CEloss를 계산해 추론함(k_test가 결과에 어떤 영향? 클수록 많은 추론 후보를 고려하나, 계산 비용도 증가)
+inference: 'generate' # generate에서의 성능은??확인해보기
 
 # optimization config
 init_lr: 2e-5
@@ -36,6 +36,6 @@ optimizer: {init_lr: 2e-5, weight_decay: 0.05, min_lr: 0}
 scheduler: {epochs: 10, num_warmup_steps: 0, sched: cosine}
 
 wandb_data:
-  name: mask_75
-  project: VQA_EarthVQA_epoch_10
-  tags: [mask_75]
+  name: mask_90
+  project: VQA_EarthVQA_generate
+  tags: [mask_90]

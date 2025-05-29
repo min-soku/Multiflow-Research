@@ -69,7 +69,7 @@ def main(args):
         # each dataset is initialized via a .yaml config file, you can find these in 'configs/prune/general_loader_{model_name}' 
         dataset_config_path = f'configs/prune/general_loader_{args.model}.yaml'
         print(f"Loading dataset config from {dataset_config_path}.")
-        print("<Pruning에 필요한 dataset 불러오기 -> pretrain_dataset.py로 이동>") 
+        print("<Pruning에 필요한 dataset 불러오기 -> datasets/pretrain_dataset.py로 이동>") 
         config_for_dataset = yaml.load(open(dataset_config_path, 'r'), Loader=yaml.Loader)
         
         # you can regard the 'general' dataset as out-of-domain data (i.e., CC3M in our case) 
@@ -155,12 +155,14 @@ def main(args):
         # NOTE: the sparsity is always the first positional argument for the 'prune' method of each Pruner
         time_start = time.time()
         #Pruning 실행
+        print("<Pruning 시작, prune.py -> multiflow.py의 prune() 실행>")
         pruner.prune(sparsity, *score_args, **score_kwargs)
         time_end = time.time()
         runtimes['runtime'].append(time_end - time_start)
         runtimes['sparsity'].append(sparsity_string)
         
         # when done, save the mask
+        #만들어진 pruning mask을 저장
         last_folder = args.output_dir.split('/')[-1]
         if last_folder != str(pruner):
             args.output_dir = os.path.join(args.output_dir, str(pruner))
@@ -221,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', default="pruned_weights", help="directory where to dump the pruned weights. Default: ./pruned_weights")
     parser.add_argument('--lambda_', type=float, default=1e-5, 
                         help='ridge penalty for CHITA and CHITA++, unused otherwise. Please see our Supp. Mat. on how to set this! Default: 1e-5')
+    parser.add_argument("--nat_pth", required=True, help="자연 score pth 경로")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)

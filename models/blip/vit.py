@@ -19,6 +19,8 @@ from timm.models.layers import trunc_normal_, DropPath
 from timm.models.helpers import adapt_input_conv
 
 from fairscale.nn.checkpoint.checkpoint_activations import checkpoint_wrapper
+import os
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks

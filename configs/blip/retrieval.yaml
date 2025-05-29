@@ -7,17 +7,25 @@ batch_size_train: 16
 # val_file: data/finetune/itr/coco_val.json
 # test_file: data/finetune/itr/coco_test.json
 
-train_file: [data/finetune/itr/rsicd_train.json]
-val_file: data/finetune/itr/rsicd_val.json
-test_file: data/finetune/itr/rsicd_test.json
+# train_file: [data/finetune/itr/rsicd_train.json]
+# val_file: data/finetune/itr/rsicd_val.json
+# test_file: data/finetune/itr/rsicd_test.json
+
+train_file: [data/finetune/itr/nwpu_train.json]
+val_file: data/finetune/itr/nwpu_val.json
+test_file: data/finetune/itr/nwpu_test.json
 
 # image_root: 'images/coco'
 # ann_root: 'annotation'
 # dataset: 'coco'
 
-image_root: 'images/rsicd'
+# image_root: 'images/rsicd'
+# ann_root: 'annotation'
+# dataset: 'rsicd'
+
+image_root: 'images/NWPU-captions'
 ann_root: 'annotation'
-dataset: 'rsicd'
+dataset: 'nwpu'
 
 # set pretrained as a file path or an url
 pretrained: ''
@@ -43,6 +51,6 @@ max_tokens: 35
 
 # config for W&B
 wandb_data:
-  name: mask_90
-  project: retrieval_rsicd_epoch_10
-  tags: [mask_90]
+  name: no_mask
+  project: retrieval_nwpu_epoch_10
+  tags: [no_mask]

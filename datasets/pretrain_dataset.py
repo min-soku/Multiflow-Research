@@ -388,7 +388,26 @@ class BlipPretrainDataset(Dataset):
             self.SkyScript_data = json.load(open(self.SkyScript_file, 'r'))
             print(f"Loading successful! (loaded {len(self.SkyScript_data)} files)\n")
             self.annotations += self.SkyScript_data
+        
+        if 'nwpu_file' in config:
+            self.nwpu_file = config['nwpu_file']
+            self.nwpu_image_root = config['nwpu_image_root']
 
+            # load the annotations into memory
+            print(f"Loading nwpu data from {self.nwpu_file}")
+            self.nwpu_data = json.load(open(self.nwpu_file, 'r'))
+            print(f"Loading successful! (loaded {len(self.nwpu_data)} files)\n")
+            self.annotations += self.nwpu_data    
+
+        if 'rsicd_file' in config:
+            self.rsicd_file = config['rsicd_file']
+            self.rsicd_image_root = config['rsicd_image_root']
+
+            # load the annotations into memory
+            print(f"Loading rsicd data from {self.rsicd_file}")
+            self.rsicd_data = json.load(open(self.rsicd_file, 'r'))
+            print(f"Loading successful! (loaded {len(self.rsicd_data)} files)\n")
+            self.annotations += self.rsicd_data    
         # if 'cc3m_file' in config:
         #     self.cc3m_file = config['cc3m_file']
         #     self.cc3m_image_root = config['cc3m_image_root']
@@ -398,6 +417,14 @@ class BlipPretrainDataset(Dataset):
         #     print(f"Loading successful! (loaded {len(self.cc3m_data)} files)\n")
         #     self.annotations += self.cc3m_data
         
+        if 'flickr30k_file' in config:
+            self.flickr30k_file = config['flickr30k_file']
+            self.flickr30k_image_root = config['flickr30k_image_root']
+
+            print(f"Loading flickr30k Captions data from {self.flickr30k_file}")
+            self.flickr30k_data = json.load(open(self.flickr30k_file, 'r'))
+            print(f"Loading successful! (loaded {len(self.flickr30k_data)} files)\n")
+            self.annotations += self.flickr30k_data
 
         if 'sbu_file' in config:
             self.sbu_file = config['sbu_file']
@@ -438,8 +465,16 @@ class BlipPretrainDataset(Dataset):
     def get_image_path(self, index):
         ann = self.annotations[index]
         # load the image into memory and transform it
-        if ann[self.dataset_key] == "SkyScript":
-            image_root = self.SkyScript_image_root
+        # if ann[self.dataset_key] == "cc3m":
+        #     image_root = self.cc3m_image_root
+        # if ann[self.dataset_key] == "SkyScript":
+        #     image_root = self.SkyScript_image_root
+        if ann[self.dataset_key] == "nwpu":
+            image_root = self.nwpu_image_root
+        elif ann[self.dataset_key] == "rsicd":
+            image_root = self.sbu_image_root
+        elif ann[self.dataset_key] == "flickr30k":
+            image_root = self.flickr30k_image_root
         elif ann[self.dataset_key] == "sbu":
             image_root = self.sbu_image_root
         elif ann[self.dataset_key] == "vg":
@@ -454,8 +489,16 @@ class BlipPretrainDataset(Dataset):
         ann = self.annotations[index]
 
         # load the image into memory and transform it
-        if ann[self.dataset_key] == "SkyScript":
-            image_root = self.SkyScript_image_root
+        # if ann[self.dataset_key] == "cc3m":
+        #     image_root = self.cc3m_image_root
+        # if ann[self.dataset_key] == "SkyScript":
+        #     image_root = self.SkyScript_image_root
+        if ann[self.dataset_key] == "nwpu":
+             image_root = self.nwpu_image_root
+        elif ann[self.dataset_key] == "rsicd":
+            image_root = self.rsicd_image_root
+        elif ann[self.dataset_key] == "flickr30k":
+            image_root = self.flickr30k_image_root
         elif ann[self.dataset_key] == "sbu":
             image_root = self.sbu_image_root
         elif ann[self.dataset_key] == "vg":
@@ -508,6 +551,7 @@ class BlipPretrainDataset(Dataset):
         return len(self.annotations)
     
     def collate_fn(self, batch):
+        print("[Debug] datasets/pretrain_dataset.py -> collate_fn()함수 호출 : dataloader에서 사용할 data 가공")
         images = torch.stack([b[0] for b in batch])
         captions = [b[1] for b in batch]
         text_input = self.tokenizer(

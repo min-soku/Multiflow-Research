@@ -17,6 +17,7 @@ from datasets.randaugment import RandomAugment
 
 
 def create_dataset(dataset, config):
+    print("[Debug] datasets/_init.py__ -> create_dataset()함수 호출 : config파일 내 dataset정보 불러옴")
     normalize = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 
     pretrain_transform = transforms.Compose([
@@ -70,10 +71,14 @@ def create_dataset(dataset, config):
         ood_config = deepcopy(config)
         if 'coco_file' in ood_config: ood_config.pop('coco_file')
         if 'vg_file' in ood_config: ood_config.pop('vg_file')
+        if 'nwpu_file' in ood_config: ood_config.pop('nwpu_file')
         general_dataset = BlipPretrainDataset(ood_config, transform=pretrain_transform)
         
         id_config = deepcopy(config)
+        # if 'cc3m_file' in id_config: id_config.pop('cc3m_file')
+        if 'rsicd_file' in id_config: id_config.pop('rsicd_file')
         if 'SkyScript_file' in id_config: id_config.pop('SkyScript_file')
+        if 'flickr30k_file' in id_config: id_config.pop('flickr30k_file')
         if 'sbu_file' in id_config: id_config.pop('sbu_file')
         region_dataset = BlipPretrainDataset(id_config, transform=pretrain_transform)
         return general_dataset, region_dataset
@@ -109,12 +114,12 @@ def create_dataset(dataset, config):
 
 
     elif dataset == 'vqa':
-
+        print("[Debug] datasets/_init.py__ -> create_dataset()함수 호출 : VQA config파일 내 dataset정보 불러옴")
         train_dataset = VQADataset(
             config['train_file'], 
             train_transform_wohflip, 
             # config['vqa_root'], 
-            # config['vg_root'],
+            # config['vg_root'],            
             config['earthvqa_root'],
             split='train',
             text_encoder=config.get('text_encoder', None), 
@@ -125,8 +130,8 @@ def create_dataset(dataset, config):
             config['val_file'],
             test_transform,
             # config['vqa_root'],
-            # config['vg_root'],
-            config['earthvqa_root'],
+            # config['vg_root'], 
+            config['earthvqa_root'],           # config['earthvqa_root'],
             split='test', 
             answer_list=config['answer_list'],
             text_encoder=config.get('text_encoder', None),
@@ -137,8 +142,8 @@ def create_dataset(dataset, config):
             config['test_file'], 
             test_transform, 
             # config['vqa_root'], 
-            # config['vg_root'],
-            config['earthvqa_root'],
+            # config['vg_root'],  
+            config['earthvqa_root'],          # config['earthvqa_root'],
             split='test', 
             answer_list=config['answer_list'],
             text_encoder=config.get('text_encoder', None),
@@ -148,6 +153,7 @@ def create_dataset(dataset, config):
         return train_dataset, val_dataset, test_dataset
 
     elif dataset == 'captioning':
+        print("[Debug] datasets/_init.py__ -> create_dataset()함수 호출 : captioning config파일 내 dataset정보 불러옴")
         train_dataset = CocoCaptionTrainDataset(
             config['train_file'], 
             train_transform, 
@@ -155,17 +161,22 @@ def create_dataset(dataset, config):
             max_words=config['max_tokens'], 
             prompt=config['prompt']
         )
-
+        #Ground Truth file -> val.json의 image_id와 val_gt.json의 image_id가 동일한 번호(airport61 , desert61)로 인해 매칭되지 않는 문제(이미지 하나당 고유한 번호를 가져야 함)를 해결하기 위해
+        #image_id를 airplane61, desert61으로 변경하면 evaltools/ic/__init__.py에서 평가 결과 scoring시 int형으로만 받아야 하는 문제가 발생함
+        #그래서 고유 번호인 1,2,3으로 할당하면 image_id = 1이 "val_images/airport_61.jpg"임을 알 수가 없어서 
+        #config['val_gt_file']에 기존 val_images/airport_61.jpg경로와 image_id = 1이 매칭되도록 coco_karpathy_dataset.py에서 매칭시켜 넘겨주게 함
         val_dataset = CocoCaptionEvalDataset(
             config['val_file'], 
             test_transform, 
-            config['image_root']
+            config['image_root'],
+            config['val_gt_file'] 
         )
 
         test_dataset = CocoCaptionEvalDataset(
             config['test_file'], 
             test_transform, 
-            config['image_root']
+            config['image_root'],
+            config['test_gt_file']
         )
 
         return train_dataset, val_dataset, test_dataset

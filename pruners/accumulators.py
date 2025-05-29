@@ -55,15 +55,18 @@ def xvlm_forward_output(model, batch, device, modality="vision"):
 
 
 def blip_forward_output(model, batch, device, **kwargs):
+    print("[Debug] pruners/accumulators.py -> blip_forward_output()함수 호출 : pruning을 위한 순전파 수행")
     image, text_ids, text_atts = batch
 
     # forward the images through the vision encoder
+    print("[Debug] pruners/accumulators.py -> blip_forward_output()함수 : Vision encoder forward")
     image_embeds = model.visual_encoder(image) 
     image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device) 
 
     # forward the text through the image-grounded text encoder of the med
     encoder_input_ids = text_ids.clone()
     encoder_input_ids[:,0] = model.tokenizer.enc_token_id
+    print("[Debug] pruners/accumulators.py -> blip_forward_output()함수 : Image-grounded text encoder forward")
     output_pos = model.text_encoder(
         encoder_input_ids,
         attention_mask = text_atts,
@@ -75,6 +78,7 @@ def blip_forward_output(model, batch, device, **kwargs):
     # forward the text through the image-grounded text decoder of the med (to store activations of the causal self-attention)
     decoder_input_ids = text_ids.clone()      
     decoder_input_ids[:,0] = model.tokenizer.bos_token_id
+    print("[Debug] pruners/accumulators.py -> blip_forward_output()함수 : Image-grounded text decoder forward")
     decoder_output = model.text_decoder(
         decoder_input_ids, 
         attention_mask = text_atts, 

@@ -34,7 +34,7 @@ def vqa_collate_fn(batch): # 입력된 train dataset의 batch의 개별 샘플�
         # answers: 예) ["Yes"] (단일 정답), 또는 [["Yes"], ["No"], ...] 일 수도 있음
         # 만약 answers 자체가 2차원이라면, 각 sublist를 평탄화
         # 예: [["No"], ["0"]] -> ["No","0"]
-        flattened_answers = []
+        flattened_answers = []                                                                                     
         for ans in answers:
             if isinstance(ans, list) and len(ans) == 1:
                 flattened_answers.append(ans[0])  # 안에 있는 문자열만 추출
@@ -121,7 +121,7 @@ class VQADataset(Dataset):
         if 'dataset' in ann.keys(): #vq, vqa => EarthVQA로 통합
             # if ann['dataset'] == 'vqa':
             #     image_path = os.path.join(self.vqa_root, ann['image'])
-            if ann['dataset'] == 'EarthVQA':
+            if ann['dataset'] == 'EarthVQA': # earthvqa인 경우 디렉토리 루트 + 파일명으로 전체 이미지 경로 생성
                 image_path = os.path.join(self.earthvqa_root, ann['image'])
             # elif ann['dataset'] == 'vg':
             #     image_path = os.path.join(self.vg_root, os.path.basename(ann['image']))
@@ -135,18 +135,18 @@ class VQADataset(Dataset):
 
         image = Image.open(image_path).convert('RGB')
 
-        if (self.split != 'test') and rand() < 0.5:
+        if (self.split != 'test') and rand() < 0.5: # 테스트셋이 아니면 50%확률로 이미지에 수평 반전을 적용하여 증강함
             if self.careful_hflip and self.left_or_right_in(ann['question'], ann['answer']):
                 pass
             else:
                 image = hflip(image)
 
-        image = self.transform(image)
+        image = self.transform(image) # 이미지를 모델에 맞게 전처리
 
         if self.split == 'test':
             question = pre_question(ann['question'], self.max_ques_words)
             question_id = ann['question_id']
-            return image, question, question_id
+            return image, question, question_id # 
 
         elif self.split == 'train': # EarthVQA로 변경
             question = pre_question(ann['question'], self.max_ques_words)
@@ -157,7 +157,7 @@ class VQADataset(Dataset):
             
             if ('dataset' in ann.keys()) and (ann['dataset'] == 'EarthVQA'):
                 answers = [ann['answer']]
-                weights = [0.5]
+                weights = [0.5] #가중치가 무엇을 의미?
 
             # else:
             #     answer_weight = {}

@@ -80,7 +80,7 @@ def train(model, data_loader, optimizer, fabric: L.Fabric, scheduler, epoch, con
         #is_sync_step = False면 동기화 건너뜀 -> gradient만 계산함
         with fabric.no_backward_sync(model, enabled=not is_sync_step):
 
-            if model.name == "blip": # 동기화할 때 blip모델일 경우 determine_alpha()함수로 alpha값을 설정하여 학습 속도 조절
+            if model.name == "blip": # 동기화할 때 blip모델일 경우 determine_alpha()함수로 alpha값을 설정하여 학습 속도 조절(learning rate 조절)
                 alpha = determine_alpha(i, epoch, len(data_loader), config)
             elif model.name == "xvlm":
                 alpha = None
@@ -157,52 +157,137 @@ def train(model, data_loader, optimizer, fabric: L.Fabric, scheduler, epoch, con
     }
 
 
+# @torch.no_grad()
+# def compute_metrics(scores_i2t, scores_t2i, dataset, decimals=2):
+#     #dataset -> val_datset(검증 데이터셋)
+#     print("<retrieval.py : compute_metrics()함수 호출>")
+#     # Images->Text 성능 평가
+#     ranks = np.zeros(scores_i2t.shape[0]) #각 이미지별 정답 텍스트의 랭킹을 저장할 배열
+#     for index, score in enumerate(scores_i2t):
+#         inds = np.argsort(score)[::-1] #점수를 내림차순으로 정렬
+#         # Score
+#         rank = 1e20
+#         for i in dataset.img2txt[index]: #현재 이미지와 연결된 정답 텍스트 인덱스들
+#             tmp = np.where(inds == i)[0][0] #정답 이미지의 랭킹
+#             if tmp < rank:
+#                 rank = tmp
+#         ranks[index] = rank
+
+#     # Compute metrics
+#     tr1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
+#     tr5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
+#     tr10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
+
+#     # Text->Images 성능 평가
+#     ranks = np.zeros(scores_t2i.shape[0])
+
+#     for index, score in enumerate(scores_t2i):
+#         inds = np.argsort(score)[::-1]
+#         ranks[index] = np.where(inds == dataset.txt2img[index])[0][0]
+
+#     # Compute metrics
+#     ir1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
+#     ir5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
+#     ir10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
+
+#     tr_mean = (tr1 + tr5 + tr10) / 3
+#     ir_mean = (ir1 + ir5 + ir10) / 3
+#     r_mean = (tr_mean + ir_mean) / 2
+
+#     eval_result = {'txt_r1': round(tr1, decimals),
+#                    'txt_r5': round(tr5, decimals),
+#                    'txt_r10': round(tr10, decimals),
+#                    'txt_r_mean': round(tr_mean, decimals),
+#                    'img_r1': round(ir1, decimals),
+#                    'img_r5': round(ir5, decimals),
+#                    'img_r10': round(ir10, decimals),
+#                    'img_r_mean': round(ir_mean, decimals),
+#                    'r_mean': round(r_mean, decimals)}
+#     return eval_result
+
+
+#------------------------------
+# Failuser case 저장용 compute_metrics()함수
+#------------------------------
 @torch.no_grad()
 def compute_metrics(scores_i2t, scores_t2i, dataset, decimals=2):
-    #dataset -> val_datset(검증 데이터셋)
     print("<retrieval.py : compute_metrics()함수 호출>")
-    # Images->Text 성능 평가
-    ranks = np.zeros(scores_i2t.shape[0]) #각 이미지별 정답 텍스트의 랭킹을 저장할 배열
+     # Images->Text 성능 평가
+
+    ranks = np.zeros(scores_i2t.shape[0])
     for index, score in enumerate(scores_i2t):
-        inds = np.argsort(score)[::-1] #점수를 내림차순으로 정렬
-        # Score
+        inds = np.argsort(score)[::-1]
+         # Score
         rank = 1e20
-        for i in dataset.img2txt[index]: #현재 이미지와 연결된 정답 텍스트 인덱스들
-            tmp = np.where(inds == i)[0][0] #정답 이미지의 랭킹
+        for i in dataset.img2txt[index]:
+            tmp = np.where(inds == i)[0][0]
             if tmp < rank:
                 rank = tmp
         ranks[index] = rank
 
-    # Compute metrics
+     # Compute metrics
     tr1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
     tr5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
     tr10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
 
-    # Text->Images 성능 평가
-    ranks = np.zeros(scores_t2i.shape[0])
+    # --- 여기서 I→T 실패 케이스 인덱스 저장 ---
+    # K=10 기준으로 GT가 Top-10 안에 없으면 실패로 간주
+    ranks_i2t = ranks.copy()
+    fail_i2t = np.where(ranks_i2t >= 10)[0].tolist()
 
+
+     # Text->Images 성능 평가
+
+    ranks = np.zeros(scores_t2i.shape[0])
+ 
     for index, score in enumerate(scores_t2i):
         inds = np.argsort(score)[::-1]
         ranks[index] = np.where(inds == dataset.txt2img[index])[0][0]
 
-    # Compute metrics
+     # Compute metrics
     ir1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
     ir5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
     ir10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
+
+    # --- 여기서 T→I 실패 케이스 인덱스 저장 ---
+    ranks_t2i = ranks.copy()
+    fail_t2i = np.where(ranks_t2i >= 10)[0].tolist()
+ 
 
     tr_mean = (tr1 + tr5 + tr10) / 3
     ir_mean = (ir1 + ir5 + ir10) / 3
     r_mean = (tr_mean + ir_mean) / 2
 
-    eval_result = {'txt_r1': round(tr1, decimals),
-                   'txt_r5': round(tr5, decimals),
-                   'txt_r10': round(tr10, decimals),
-                   'txt_r_mean': round(tr_mean, decimals),
-                   'img_r1': round(ir1, decimals),
-                   'img_r5': round(ir5, decimals),
-                   'img_r10': round(ir10, decimals),
-                   'img_r_mean': round(ir_mean, decimals),
-                   'r_mean': round(r_mean, decimals)}
+    eval_result = {
+        'txt_r1': round(tr1, decimals),
+        'txt_r5': round(tr5, decimals),
+        'txt_r10': round(tr10, decimals),
+        'txt_r_mean': round(tr_mean, decimals),
+        'img_r1': round(ir1, decimals),
+        'img_r5': round(ir5, decimals),
+        'img_r10': round(ir10, decimals),
+        'img_r_mean': round(ir_mean, decimals),
+        'r_mean': round(r_mean, decimals)
+    }
+
+    # ─── 실패 케이스 JSON 덤프 ─────────────────────────────────────
+    import json, os, datetime
+    # 예: 결과를 blip_no_mask_rsicd 폴더에 저장
+    base_dir = os.path.join("results", "retrieval", "nwpu",
+                            "epoch_10",    
+                            "blip_mask_90_rsicd")
+    os.makedirs(base_dir, exist_ok=True)
+    fname = os.path.join(
+        base_dir,
+        f"rsicd_failcases_mask_90.json"
+    )
+    with open(fname, "w", encoding="utf-8") as fp:
+        json.dump({
+            "i2t_fail_idx": fail_i2t,
+            "t2i_fail_idx": fail_t2i
+        }, fp, ensure_ascii=False, indent=2)
+    print(f"[Fail-Dump] I→T:{len(fail_i2t)}  T→I:{len(fail_t2i)}  → {fname}")
+ 
     return eval_result
 
 
@@ -349,13 +434,13 @@ def main(args, config):
     # log some stats regarding the pruned parameters
     print(f"Total Params: {millions(num_params(model)):.2f}M")
     #prune.utils.py의 named_masked_parameters()함수 호출
-    #전체 param에서 prunable하지 않은 param 제외 -> remaining param
+    #전체 param에서 prunable하지 않은 parameter 제외 -> remaining param
     remaining_params, total_params = stats(named_masked_parameters(model, exclude=get_unprunable_parameters(model.name)))
     print(f"Remaining params: {millions(remaining_params, decimals=2)} / {millions(total_params, decimals=2)} ({remaining_params/total_params*100:.2f}%)")
 
     # load the configuration (they remain the same across resumes)
     arg_opt = utils.AttrDict(config['optimizer']) # optimizer 설정 저장
-    optimizer = create_optimizer(arg_opt, model) # optimizer 생성
+    optimizer = create_optimizer(arg_opt, model) # 저장된 설정에 맞는 optimizer 생성
 
     # once the model weights are initialized, distribute everything
     #분산 환경에서 사용할 수 있도록 함 
@@ -422,7 +507,7 @@ def main(args, config):
     save_freq = config['save_freq'] if 'save_freq' in config else 1 #모델을 저장하는 주기(epoch) 설정 -> snapshot저장
 
     # start fault-tolerant distributed training
-    if epochs_run == max_epoch: #모든 epoch 학습을 마친 경우 
+    if epochs_run == max_epoch: #모든 epoch 학습을 마친 경우 (snapshot이 있는 경우)
         done_training = True
     else:
         done_training = False # 아닌 경우, 학습 시작
@@ -446,8 +531,9 @@ def main(args, config):
         # evaluate on the validation set
         # 위에서 정의한 evaluation 함수로 val_loader(검증 데이터셋)을 사용해 I2T, T2I 작업 수행
         # score_val_i2t : image-to-text 검색 점수 / score_val_t2i : text-to-image 검색 점수
+        # evaltools/itr_utils.py의 blip_itr_evaluation()함수 호출
         score_val_i2t, score_val_t2i = evaluation(model, val_loader, tokenizer, fabric, config, debug_mode=args.debug)
-        #점수로 평가 점수 계산
+        #validation 점수 계산
         val_result = compute_metrics(score_val_i2t, score_val_t2i, dataset=val_dataset)
         print(val_result)
         
@@ -498,6 +584,7 @@ def main(args, config):
             f.write("best epoch: %d" % best_epoch)
 
     # finally, evaluate the best model on the test set
+    # Training 종료 후 Inference
     if done_training: 
         print("Training completed. Start testing", flush=True)
 
@@ -505,9 +592,9 @@ def main(args, config):
         fabric.barrier()
 
         # NOTE: here I load with fabric since the model is one the gpu already
-        snapshot = fabric.load(os.path.join(args.output_dir, 'checkpoint_best.pt'))
-        model.load_state_dict(snapshot['model_state'])
-        score_test_i2t, score_test_t2i = evaluation(model, test_loader, tokenizer, fabric, config, debug_mode=args.debug)
+        snapshot = fabric.load(os.path.join(args.output_dir, 'checkpoint_best.pt')) # checkpoint 불러옴
+        model.load_state_dict(snapshot['model_state']) # checkpoint 적용
+        score_test_i2t, score_test_t2i = evaluation(model, test_loader, tokenizer, fabric, config, debug_mode=args.debug) # test dataset에 대해 evaluation 평가 수행
         test_result = compute_metrics(score_test_i2t, score_test_t2i, dataset=test_dataset)
         print(test_result)
 

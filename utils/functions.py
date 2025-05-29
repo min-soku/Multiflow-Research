@@ -48,6 +48,7 @@ def xvlm_detect_modality_fn(param_name, return_layer_idx=False):
 
 
 def blip_detect_modality_fn(param_name, return_layer_idx=False):
+    # 파라미터 이름을 분석해 해당 파라미터가 vision용인지 text용인지 판별
     if param_name.startswith('visual_encoder'):
         modality = 'vision'
         layer_idx = int(param_name.split('.')[2])

@@ -38,33 +38,37 @@ class BLIPCaptioning(nn.Module):
             vit (str): model size of vision transformer
         """            
         super().__init__()
-        
+        print("[Debug] blip_captioning.py : BLIPCaptioning 클래스 init() 함수 호출")
+        # Vision encoder 생성
         self.visual_encoder, vision_width = create_vit(vit,image_size, vit_grad_ckpt, vit_ckpt_layer)
-        self.tokenizer = init_tokenizer()   
+        self.tokenizer = init_tokenizer() # 디코더 입력에 사용될 초기 프롬프트를 위한 토크나이저 생성   
         med_config = BertConfig.from_json_file(med_config)
-        med_config.encoder_width = vision_width
+        med_config.encoder_width = vision_width # Text decoder가 vision encoder의 이미지 임베딩을 입력으로 받기 위해 차원을 맞춰줌
+        # Text decoder 생성
         self.text_decoder = BertLMHeadModel(config=med_config)    
         
         self.prompt = prompt
-        self.prompt_length = len(self.tokenizer(self.prompt).input_ids)-1
+        self.prompt_length = len(self.tokenizer(self.prompt).input_ids)-1 # 프롬프트를 구분하기 위해 패딩을 추가하여 토크나이징함
 
         
     def forward(self, image, caption, already_tokenized=False):
+        print("[Debug] blip_captioning.py : BLIPCaptioning 클래스 forward() 함수 호출")
+        image_embeds = self.visual_encoder(image) # 비전 인코더를 통해 이미지 임베딩 생성
+        image_atts = torch.ones(image_embeds.size()[:-1],dtype=torch.long).to(image.device) # 이미지 어텐션 마스크 생성
         
-        image_embeds = self.visual_encoder(image) 
-        image_atts = torch.ones(image_embeds.size()[:-1],dtype=torch.long).to(image.device)
-        
-        if not already_tokenized:
+        if not already_tokenized: # caption이 이미 토크나이징 되어있지 않은 경우
+            # caption을 토크나이징하여 텐서로 변환
             text = self.tokenizer(caption, padding='longest', truncation=True, max_length=40, return_tensors="pt").to(image.device)
-        else:
+        else: # caption이 이미 토크나이징 되어있는 경우
             text = caption.to(image.device)
         
-        text.input_ids[:,0] = self.tokenizer.bos_token_id
+        text.input_ids[:,0] = self.tokenizer.bos_token_id # 디코더 입력의 첫 번째 토큰을 [DEC]로 설정
         
-        decoder_targets = text.input_ids.masked_fill(text.input_ids == self.tokenizer.pad_token_id, -100)         
-        decoder_targets[:,:self.prompt_length] = -100
+        # 정답 레이블 생성
+        decoder_targets = text.input_ids.masked_fill(text.input_ids == self.tokenizer.pad_token_id, -100) # 패딩 토큰을 -100으로 설정하여 손실 계산에서 제외     
+        decoder_targets[:,:self.prompt_length] = -100 # 프롬프트 부분을 -100으로 설정하여 손실 계산에서 제외
      
-        decoder_output = self.text_decoder(text.input_ids, 
+        decoder_output = self.text_decoder(text.input_ids, # 입력된 캡션의 일부를 기반으로 다음 토큰을 예측하여 loss 계산
                                            attention_mask = text.attention_mask, 
                                            encoder_hidden_states = image_embeds,
                                            encoder_attention_mask = image_atts,                  
@@ -76,21 +80,23 @@ class BLIPCaptioning(nn.Module):
         
 
     def generate(self, image, sample=False, num_beams=3, max_length=30, min_length=10, top_p=0.9, repetition_penalty=1.0):
-        image_embeds = self.visual_encoder(image)
+        image_embeds = self.visual_encoder(image) # 비전 인코더를 통해 이미지 임베딩 생성
 
         # if not sample:
         #     image_embeds = image_embeds.repeat_interleave(num_beams, dim=0)
-            
+
+        # 이미지 어텐션 마스크 생성     
         image_atts = torch.ones(image_embeds.size()[:-1],dtype=torch.long).to(image.device)
+        # 디코더 호출 시 전달할 준비된 인자들
         model_kwargs = {"encoder_hidden_states": image_embeds, "encoder_attention_mask":image_atts}
         
-        prompt = [self.prompt] * image.size(0)
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(image.device) 
-        input_ids[:,0] = self.tokenizer.bos_token_id
-        input_ids = input_ids[:, :-1] 
+        prompt = [self.prompt] * image.size(0) # Batch에 있는 각 이미지를 위해 동일한 프롬프트 준비
+        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(image.device) # 프롬프트를 토크나이징하여 텐서로 변환
+        input_ids[:,0] = self.tokenizer.bos_token_id # 첫 번째 토큰을 [BOS]로 설정
+        input_ids = input_ids[:, :-1] # 마지막 토근 [SEP]은 제거하여 디코더가 프롬프트 뒤에 새 토큰을 생성하도록 함
 
-        if sample:
-            #nucleus sampling
+        if sample: # sample = True인 경우
+            #nucleus sampling : 모델이 예측한 확률 상위 p의 후보만 남긴 뒤, 그 중 랜덤으로 한 토큰을 선택하여 문장 생성
             outputs = self.text_decoder.generate(input_ids=input_ids,
                                                   max_length=max_length,
                                                   min_length=min_length,
@@ -102,7 +108,7 @@ class BLIPCaptioning(nn.Module):
                                                   repetition_penalty=1.1,                                            
                                                   **model_kwargs)
         else:
-            #beam search
+            #beam search : 여러 beam 경로를 탐색하며 가장 높은 확률의 문장을 찾는다.
             outputs = self.text_decoder.generate(input_ids=input_ids,
                                                   max_length=max_length,
                                                   min_length=min_length,
@@ -113,18 +119,19 @@ class BLIPCaptioning(nn.Module):
                                                   **model_kwargs)            
             
         captions = []    
-        for output in outputs:
+        for output in outputs: # 디코더가 생성한 토큰 시퀀스를 디코딩하여 문장으로 변환
             caption = self.tokenizer.decode(output, skip_special_tokens=True)    
             captions.append(caption[len(self.prompt):])
         return captions
     
     def load_from_pruned_pretrained(self, pretraining_weights, mask, config, load_capt_pretrain=False):
+        print("[Debug] blip_captioning.py : load_from_pruned_pretrained() 함수 호출 -> pruning mask 적용")
         self.load_pretrained(pretraining_weights, config, load_capt_pretrain)
 
         print(f"Loading from mask at: {mask}")
         mask = torch.load(mask, map_location="cpu")
-        mask = inherit_encoder_decoder_masks(mask)
-        msg = self.load_state_dict(mask, strict=False)
+        mask = inherit_encoder_decoder_masks(mask) # 가중치를 공유하고 있는 encoder와 decoder 사이에 mask를 공유
+        msg = self.load_state_dict(mask, strict=False) # pruninig mask 적용
         print("missing keys:")
         print([k for k in msg.missing_keys if "bias" not in k and "layernorm" not in k.lower() and "pruning_mask" in k])
         
@@ -133,6 +140,7 @@ class BLIPCaptioning(nn.Module):
         print([k for k in msg.unexpected_keys if not any([x in k.lower() for x in keys_to_exclude])])
     
     def load_pretrained(self, weights_ckpt, *args, **kwargs):
+        print("[Debug] blip_captioning.py : load_pretrained() 함수 호출 -> pre-trained된 가중치 정보 출력")
         print("Loaded params from: ", weights_ckpt)
         _, msg = load_checkpoint(self, weights_ckpt)
         print("missing keys:")

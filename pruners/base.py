@@ -72,6 +72,7 @@ class Pruner:
             
     @torch.no_grad()
     def _local_mask(self, sparsity):
+        print("[Debug] pruners/base.py -> _local_mask()함수 호출 : pruning을 위한 mask 생성")
         r"""Updates masks of model with scores by sparsity level parameter-wise.
         """
         for _, mask, param in self.named_masked_parameters:
@@ -79,17 +80,20 @@ class Pruner:
             # k = int((1.0 - sparsity) * score.numel())
             
             if isinstance(sparsity, dict):
+                # 파라미터별 sparsity 비율 적용
                 sparsity_for_this_param = sparsity[id(param)]
             else:
                 sparsity_for_this_param = sparsity
             k = int(sparsity_for_this_param * score.numel())
             if not k < 1:
-                threshold, _ = torch.kthvalue(torch.flatten(score), k)
+                threshold, _ = torch.kthvalue(torch.flatten(score), k) # 해당 파라미터에서 k번째로 작은 값을 threshold로 설정
                 zero = torch.tensor([0], dtype=torch.bool).to(mask.device)
                 one = torch.tensor([1], dtype=torch.bool).to(mask.device)
+                # mask를 threshold보다 작은 값은 0으로, 나머지는 1로 설정
                 mask.copy_(torch.where(score.to(mask.device) <= threshold, zero, one))
 
     def compute_mask(self, sparsity, scope):
+        print("[Debug] pruners/base.py -> compute_mask()함수 호출 : pruning을 위한 mask 생성")
         r"""Updates masks of model with scores by sparsity according to scope.
         """
         if scope == 'global':
@@ -134,5 +138,6 @@ class Pruner:
         return state_dict
     
     def load_state_dict(self, state_dict):
+        print("[Debug] pruners/base.py -> load_state_dict()함수 호출 : pruning을 위한 mask")
         for name, _, param in self.named_masked_parameters:
             self.scores[id(param)] = state_dict[name].to(param.device)

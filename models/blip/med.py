@@ -135,10 +135,12 @@ class BertSelfAttention(nn.Module):
     def get_attention_map(self):
         return self.attention_map
     
+    
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
+    
 
     def forward(
         self,
@@ -151,7 +153,6 @@ class BertSelfAttention(nn.Module):
         output_attentions=False,
     ):
         mixed_query_layer = self.query(hidden_states)
-
         # If this is instantiated as a cross-attention module, the keys
         # and values come from an encoder; the attention mask needs to be
         # such that the encoder's padding tokens are not attended to.
@@ -161,6 +162,7 @@ class BertSelfAttention(nn.Module):
             key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
             value_layer = self.transpose_for_scores(self.value(encoder_hidden_states))
             attention_mask = encoder_attention_mask
+            
         elif past_key_value is not None:
             key_layer = self.transpose_for_scores(self.key(hidden_states))
             value_layer = self.transpose_for_scores(self.value(hidden_states))
@@ -175,7 +177,13 @@ class BertSelfAttention(nn.Module):
         past_key_value = (key_layer, value_layer)
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+               # 올바른 4D batched matmul
+        # query_layer: (batch, heads, q_len, head_dim)
+        # key_layer.transpose: (batch, heads, head_dim, k_len)
+        attention_scores = torch.matmul(
+            query_layer,
+            key_layer.transpose(-1, -2)
+        )  # → (batch, heads, q_len, k_len)
 
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
             seq_length = hidden_states.size()[1]

@@ -113,13 +113,14 @@ class BLIPRetrieval(nn.Module):
             # print("forwarding momentum image encoder")
             image_embeds_m = visual_encoder_m(image) 
             image_feat_m = F.normalize(vision_proj_m(image_embeds_m[:,0,:]),dim=-1)  
-            image_feat_m_all = torch.cat([image_feat_m.t(), self.image_queue.clone().detach()],dim=1)                   
+            image_feat_m_all = torch.cat([image_feat_m.t(), self.image_queue.clone().detach()],dim=1)  #모멘텀 image feature와 전체 momentum image 큐를 합쳐서 전체 momentum image feature 생성                  
             
             # print("forwarding momentum text encoder")
             text_output_m = text_encoder_m(text_ids, attention_mask = text_atts,                      
                                             return_dict = True, mode = 'text')    
             text_feat_m = F.normalize(text_proj_m(text_output_m.last_hidden_state[:,0,:]),dim=-1) 
-            text_feat_m_all = torch.cat([text_feat_m.t(), self.text_queue.clone().detach()],dim=1)
+            text_feat_m_all = torch.cat([text_feat_m.t(), self.text_queue.clone().detach()],dim=1) #모멘텀 text feature와 전체 momentum text 큐를 합쳐서 전체 momentum text feature 생성
+            # 모멘텀 큐를 만들면 학습에서 진동이 커지지 않고 안정적으로 학습할 수 있음(관성)
 
             sim_i2t_m = image_feat_m @ text_feat_m_all / self.temp  # momentum 이미지 feature와 전체 momentum text 큐 사이 내적 계산
             sim_t2i_m = text_feat_m @ image_feat_m_all / self.temp  # momentum 텍스트 feature와 전체 momentum image 큐 사이 내적 계산 
@@ -136,7 +137,7 @@ class BLIPRetrieval(nn.Module):
         loss_i2t = -torch.sum(F.log_softmax(sim_i2t, dim=1)*sim_i2t_targets,dim=1).mean()
         loss_t2i = -torch.sum(F.log_softmax(sim_t2i, dim=1)*sim_t2i_targets,dim=1).mean() 
 
-        loss_itc = (loss_i2t+loss_t2i)/2
+        loss_itc = (loss_i2t+loss_t2i)/2 # 대조학습 전체 loss
         
         # print("running all gather")
         idxs = concat_all_gather(idx)
@@ -151,6 +152,7 @@ class BLIPRetrieval(nn.Module):
         # forward the positve image-text pair
         bs = image.size(0)
         # print("forwarding positive image-text pair")
+        # posiive 샘플 순전파
         output_pos = self.text_encoder(encoder_input_ids,
                                        attention_mask = text_atts,
                                        encoder_hidden_states = image_embeds,
@@ -161,19 +163,19 @@ class BLIPRetrieval(nn.Module):
         # print("forwarding negative image-text pair")
         with torch.no_grad():                
             mask = torch.eq(idx, idx.t())
-            
+            # 이미지-텍스트 벡터 간 유사도 계산
             sim_i2t = image_feat @ text_feat.t() / self.temp 
             sim_t2i = text_feat @ image_feat.t() / self.temp 
 
             weights_i2t = F.softmax(sim_i2t,dim=1)
-            weights_i2t.masked_fill_(mask, 0)            
+            weights_i2t.masked_fill_(mask, 0) # 동일한 샘플은 제외
 
             weights_t2i = F.softmax(sim_t2i,dim=1)
-            weights_t2i.masked_fill_(mask, 0)     
+            weights_t2i.masked_fill_(mask, 0) # 동일한 샘플은 제외    
 
         # select a negative image (from same rank) for each text
         image_embeds_neg = []    
-        for b in range(bs):
+        for b in range(bs): # negative 이미지 샘플을 선택하기 위해 각 배치에 대해 반복
             neg_idx = torch.multinomial(weights_t2i[b], 1).item()
             image_embeds_neg.append(image_embeds[neg_idx])
         image_embeds_neg = torch.stack(image_embeds_neg, dim=0)   
@@ -181,7 +183,7 @@ class BLIPRetrieval(nn.Module):
         # select a negative text (from same rank) for each image    
         text_ids_neg = []
         text_atts_neg = []
-        for b in range(bs):
+        for b in range(bs): # negative 텍스트 샘플을 선택하기 위해 각 배치에 대해 반복
             neg_idx = torch.multinomial(weights_i2t[b], 1).item()
             text_ids_neg.append(encoder_input_ids[neg_idx])
             text_atts_neg.append(text_atts[neg_idx])            
@@ -195,6 +197,7 @@ class BLIPRetrieval(nn.Module):
         image_embeds_all = torch.cat([image_embeds_neg,image_embeds], dim=0)
         image_atts_all = torch.cat([image_atts,image_atts], dim=0)
 
+        # Negative 샘플 생성
         output_neg = self.text_encoder(text_ids_all,
                                        attention_mask = text_atts_all,
                                        encoder_hidden_states = image_embeds_all,
@@ -208,7 +211,7 @@ class BLIPRetrieval(nn.Module):
 
         itm_labels = torch.cat([torch.ones(bs,dtype=torch.long),torch.zeros(2*bs,dtype=torch.long)],
                                dim=0).to(image.device)
-        loss_itm = F.cross_entropy(vl_output, itm_labels)     
+        loss_itm = F.cross_entropy(vl_output, itm_labels) #ITM 예측 결과와 정답 label을 기반으로 ITM loss 계산   
 
         return loss_itc, loss_itm 
  

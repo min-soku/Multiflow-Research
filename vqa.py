@@ -40,11 +40,11 @@ def train(model, data_loader, optimizer, tokenizer, epoch, scheduler, fabric: L.
             
 
         # define the gradient accumulator context manager
-        # grad_acc_steps의 배수가 아니거나 마지막 batch가 아니면 동기화 X(True), grad_acc_steps이거나 마지막 batch인 경우 동기화 진행(False)
+        # grad_acc_steps의 배수가 아니거나 마지막 batch가 아니면 동기화 X(True), grad_acc_steps의 배수이거나 마지막 batch인 경우 동기화 진행(False)
         is_accumulating = not (((i + 1) % config['grad_acc_steps'] == 0) or ((i + 1) == len(data_loader)))
         with fabric.no_backward_sync(model, enabled=is_accumulating): # is_accumulating이 True인 경우 동기화 X -> forwarding을 통해 loss만 구함
             # tokenize both question and answer
-            # tokenizing에서 전처리되면서 단어 토큰과 패딩을 구분하기 위한 attentionmask도 함께 생성된다.
+            # tokenizing에서 전처리되면서 단어 토큰과 패딩을 구분하기 위한 attention mask도 함께 생성된다.
 
             question_input = tokenizer( # 질문 리스트 Tokenizing, longest한 길이에 맞춰 padding 추가하고, max_length보다 길면 자름
                 question, padding='longest', truncation=True, max_length=config['max_tokens'], return_tensors="pt"

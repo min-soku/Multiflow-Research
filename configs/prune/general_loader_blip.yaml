@@ -3,18 +3,24 @@
 
 # each caption for the whole image is already contained in the region annotations
 vg_file: 'data/pretrain/vg_dense_gby_image.json'
+flickr30k_file: 'data/pretrain/flickr30k_pretrain.json'
 #cc3m_file: 'data/pretrain/cc3m_pretrain.json'
-SkyScript_file: 'data/pretrain/SkyScript_train_unfiltered_5M.json'
+# SkyScript_file: 'data/pretrain/SkyScript_train_unfiltered_5M.json'
+# nwpu_file: 'data/pretrain/nwpu_pretrain.json'
+# rsicd_file: 'data/pretrain/rsicd_pretrain.json'
 
 # image folders
 vg_image_root: 'images/vg'
+flickr30k_image_root: 'images/flickr30k'
 #cc3m_image_root: 'images/cc3m'
-SkyScript_image_root: 'images/SkyScript'
+# SkyScript_image_root: 'images/SkyScript'
+# nwpu_image_root: 'images/NWPU-captions'
+# rsicd_image_root: 'images/rsicd'
 
 # details of annotations (keys are shared among general and region-level files)
 image_key: 'image' 
 caption_key: 'caption' 
-caption_detailed: 'caption_detailed' #SkyScript에서 좀 더 구체적인 설명, 주변 object들까지 설명?
+# caption_detailed: 'caption_detailed' #SkyScript에서 좀 더 구체적인 설명, 주변 object들까지 설명?
 dataset_key: 'dataset'
 
 # pruning settings

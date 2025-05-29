@@ -191,7 +191,8 @@ backups/
 
 # ablations
 ablations/weights.tar.gzi70rjusc.part
-pruned_weights/multiflow/*
+pruned_weights/*
+pruned_results/*
 weights/*
 weights.tar.gzi70rjusc.part
 images/*

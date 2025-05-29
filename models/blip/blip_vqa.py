@@ -37,7 +37,7 @@ class BLIPVQA(nn.Module):
 
     def forward(self, image, question, answer=None, k=None, weights=None, train=True, inference='rank', k_test=128):
         print("[Debug] blip_vqa.py : BLIPVQA 클래스 forward() 함수 실행")
-        image_embeds = self.visual_encoder(image)   # Image encoding -> Question 임베딩과 cross-attention에서 상호작용할 때 쓰임
+        image_embeds = self.visual_encoder(image)   # Image 임베딩 -> Question 임베딩과 cross-attention에서 상호작용할 때 쓰임
 
         # 이미지 임베딩 벡터의 어텐션 마스크 : 중요한 임베딩에 1로 표시하여 나타냄
         image_atts = torch.ones(image_embeds.size()[:-1],dtype=torch.long).to(image.device) 
@@ -60,7 +60,7 @@ class BLIPVQA(nn.Module):
             answer_targets = answer.input_ids.masked_fill(answer.input_ids == self.tokenizer.pad_token_id, -100)      
 
             # question 토큰을 Text encoder에 입력하여 인코딩 -> 인코딩된 question 토큰과 이미지 임베딩과 cross-attention을 통해 상호작용
-            # 결과가 딕셔너리 형태로 반환됨
+            # 결과가 딕셔너리 형태로 반환됨(이미지 정보와 질문의 연관성을 내포한 임베딩 벡터)
             question_output = self.text_encoder(question.input_ids,  # question tokens
                                                 attention_mask = question.attention_mask, # question mask 
                                                 encoder_hidden_states = image_embeds, # image embeddings
@@ -82,7 +82,7 @@ class BLIPVQA(nn.Module):
             answer_output = self.text_decoder(answer.input_ids, 
                                               attention_mask = answer.attention_mask, # 실제 정답의 어텐션 마스크
                                               encoder_hidden_states = question_states, # encoder의 output(이미지 정보와 질문의 연관성을 내포한 임베딩 벡터)을 후보 개수만큼 담은 list
-                                              encoder_attention_mask = question_atts, # 예측한 정답의 어텐션 마스크                
+                                              encoder_attention_mask = question_atts, # encoder의 output의 어텐션 마스크                
                                               labels = answer_targets, # 실제 정답을 전달하여 예측한 정답과의 loss를 계산하도록 함
                                               return_dict = True,   
                                               reduction = 'none',
@@ -91,6 +91,7 @@ class BLIPVQA(nn.Module):
             # 후보 정답 개수별로 encoder를 통해 출력된 질문 임베딩을 decoder에 넣어 디코딩을 통해 예측 정답에 대한 로짓을 계산
             # 각 질문 임베딩별 출력된 예측 로짓과 후보 정답 값을 CE Loss를 통해 각각 loss를 구한다.
 
+            #텍스트 디코더는 “질문+이미지” 인코딩 정보를 기반으로 답변 후보를 예측하고, Label을 이용하여 정확하게 예측되었는지 평가, loss계산
 
 
             loss = weights * answer_output.loss # 계산된 각 정답 후보별 loss에 가중치를 곱하여 더 중요한 후보의 loss를 크게 반영되도록 함
@@ -107,39 +108,81 @@ class BLIPVQA(nn.Module):
                                                 encoder_attention_mask = image_atts,                                    
                                                 return_dict = True) 
             
-            if inference=='generate': # 디코더를 통해 답변을 생성
-                num_beams = 3  # Beam search에서 3가지 후보를 고려
-                #Beam search : 순차적인 데이터 생성할 때 사용하는 탐색 알고리즘 
-                # 생성할 다음 후보 단어들에 대해 1가지만 선택하는 것이 아니라 3개의 후보에 대해 모두 고려하여 탐색하는 방법
+            # if inference=='generate': # 디코더를 통해 답변을 생성
+            #     num_beams = 3  # Beam search에서 3가지 후보를 고려
+            #     #Beam search : 순차적인 데이터 생성할 때 사용하는 탐색 알고리즘 
+            #     # 생성할 다음 후보 단어들에 대해 1가지만 선택하는 것이 아니라 3개의 후보에 대해 모두 고려하여 탐색하는 방법
 
-                # encoder를 통해 각 batch 내 질문 시퀀스들에 대한 답변 후보 임베딩들을 num_beams만큼 반복하여 저장
-                # 각 질문마다 여러 후보를 동시에 평가하기 위함
-                question_states = question_output.last_hidden_state.repeat_interleave(num_beams, dim=0)
+            #     # encoder를 통해 각 batch 내 질문 시퀀스들에 대한 답변 후보 임베딩들을 num_beams만큼 반복하여 저장
+            #     # 각 질문마다 여러 후보를 동시에 평가하기 위함
+            #     question_states = question_output.last_hidden_state.repeat_interleave(num_beams, dim=0)
                 
-                # Batch 내 토큰에 대해 모두 1로 마스킹하여 모두 유효한 정보임을 표시함
-                question_atts = torch.ones(question_states.size()[:-1],dtype=torch.long).to(question_states.device)
+            #     # Batch 내 토큰에 대해 모두 1로 마스킹하여 모두 유효한 정보임을 표시함
+            #     question_atts = torch.ones(question_states.size()[:-1],dtype=torch.long).to(question_states.device)
                 
-                # Decoder에 추가적으로 전달할 인자들을 딕셔너리 형태로 저장함
-                model_kwargs = {"encoder_hidden_states": question_states, "encoder_attention_mask":question_atts}
+            #     # Decoder에 추가적으로 전달할 인자들을 딕셔너리 형태로 저장함
+            #     model_kwargs = {"encoder_hidden_states": question_states, "encoder_attention_mask":question_atts}
                 
-                # Batch 크기만큼, 각 샘플마다 시작 토큰을 정의함
-                bos_ids = torch.full((image.size(0),1),fill_value=self.tokenizer.bos_token_id,device=image.device)
+            #     # Batch 크기만큼, 각 샘플마다 시작 토큰을 정의함
+            #     bos_ids = torch.full((image.size(0),1),fill_value=self.tokenizer.bos_token_id,device=image.device)
                 
-                # Decoder generate 함수 호출
-                outputs = self.text_decoder.generate(input_ids=bos_ids,
-                                                     max_length=10,
-                                                     min_length=1,
-                                                     num_beams=num_beams,
-                                                     eos_token_id=self.tokenizer.sep_token_id,
-                                                     pad_token_id=self.tokenizer.pad_token_id, 
-                                                     **model_kwargs)
+            #     # Decoder generate 함수 호출
+            #     outputs = self.text_decoder.generate(input_ids=bos_ids,
+            #                                          max_length=10,
+            #                                          min_length=1,
+            #                                          num_beams=num_beams,
+            #                                          eos_token_id=self.tokenizer.sep_token_id,
+            #                                          pad_token_id=self.tokenizer.pad_token_id, 
+            #                                          **model_kwargs)
                 
-                answers = []    
-                for output in outputs: # 생성된 각 답변 토큰 시퀀스를 순회하며 특수 토큰을 제외하여 텍스트 문자열로 반환한다.
-                    answer = self.tokenizer.decode(output, skip_special_tokens=True)    
-                    answers.append(answer)
+            #     answers = []    
+            #     for output in outputs: # 생성된 각 답변 토큰 시퀀스를 순회하며 특수 토큰을 제외하여 텍스트 문자열로 반환한다.
+            #         answer = self.tokenizer.decode(output, skip_special_tokens=True)    
+            #         answers.append(answer)
+            #     return answers
+            if inference == 'generate':
+                num_beams = 3
+
+                # (1) 질문 임베딩 (원본 크기)
+                question_states = question_output.last_hidden_state      # (batch, seq_len, dim)
+                question_atts   = torch.ones(
+                    question_states.size()[:2],                          # (batch, seq_len)
+                    dtype=torch.long,
+                    device=question_states.device
+                )
+
+                # (2) decoder.generate() 에 넘길 키워드를 원래대로
+                model_kwargs = {
+                    "encoder_hidden_states": question_states,
+                    "encoder_attention_mask":   question_atts
+                }
+
+                # (3) 시작 토큰
+                bos_ids = torch.full(
+                    (image.size(0), 1),
+                    fill_value=self.tokenizer.bos_token_id,
+                    device=image.device
+                )
+
+                # (4) generate 호출
+                outputs = self.text_decoder.generate(
+                    input_ids=bos_ids,
+                    max_length=10,
+                    min_length=1,
+                    num_beams=num_beams,
+                    eos_token_id=self.tokenizer.sep_token_id,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    **model_kwargs
+                )
+
+                # (5) 디코딩
+                answers = [
+                    self.tokenizer.decode(o, skip_special_tokens=True)
+                    for o in outputs
+                ]
                 return answers
-            
+
+
             elif inference=='rank': # 미리 주어진 후보 답변들 중에서 질문과 가장 잘 맞는 답변을 평가하고 선택하는 과정
                 max_ids = self.rank_answer(question_output.last_hidden_state, question.attention_mask, 
                                            answer.input_ids, answer.attention_mask, k_test) # 상위 k_test개만큼의 답변에 대해 평가

@@ -28,27 +28,29 @@ from evaltools import coco_caption_eval
 
 def train(model, data_loader, optimizer, scheduler, epoch, fabric: L.Fabric, config, debug_mode=False):
     
-    model.train()
-    optimizer.zero_grad()
+    model.train() # 모델을 학습 모드로 설정
+    optimizer.zero_grad() # 옵티마이저의 기울기를 초기화
     
     steps = 0
-    steps_per_epoch = math.ceil(len(data_loader.dataset) / (config['batch_size_target']))
-    for i, (image, caption, ids) in enumerate(data_loader):
+    steps_per_epoch = math.ceil(len(data_loader.dataset) / (config['batch_size_target'])) # 한 epoch당 step 수
+    for i, (image, caption, ids) in enumerate(data_loader): # data_loader에서 batch 단위로 데이터 불러옴
 
         # forward and backward under appropriate context manager
-        is_accumulating = not (((i+1) % config['grad_acc_steps'] == 0) or ((i+1) == len(data_loader)))
-        with fabric.no_backward_sync(model, enabled=is_accumulating):
-            loss = model(image, caption, already_tokenized=True)
-            loss /= config['grad_acc_steps']
-            fabric.backward(loss)
+        # 현재 step에서 optimizer.step()을 호출할지 여부를 결정
+        is_accumulating = not (((i+1) % config['grad_acc_steps'] == 0) or ((i+1) == len(data_loader))) 
+        with fabric.no_backward_sync(model, enabled=is_accumulating): # optimizer.step()을 호출하지 않음
+            loss = model(image, caption, already_tokenized=True) # blip_captioning.py의 forward() 함수 호출
+            loss /= config['grad_acc_steps'] # loss를 grad_acc_steps로 나누어 기울기를 누적하며 평균화
+            fabric.backward(loss) # loss에 대한 기울기를 계산함
 
         # optimization step
-        if not is_accumulating:
+        if not is_accumulating: # optimizer.step()을 호출하는 경우
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
         
             # log on the web
+            # fabric.log_dict()를 통해 loss와 learning rate를 기록함
             loss_scalar = loss.item()
             lr_value = optimizer.param_groups[0]["lr"]
             if (steps+1) % config['log_freq'] == 0:
@@ -66,13 +68,13 @@ def train(model, data_loader, optimizer, scheduler, epoch, fabric: L.Fabric, con
 @torch.no_grad()
 def evaluation(result_dir, model, data_loader, epoch, fabric: L.Fabric, config, split):
     
-    assert split in ("val", "test")
+    assert split in ("val", "test") # 평가할 데이터셋이 val 또는 test인지 확인
     
-    model.eval()
+    model.eval() # 모델을 평가 모드로 설정
     result = []
     for batch_idx, (image, image_id) in enumerate(data_loader):
 
-        captions = model.generate(
+        captions = model.generate( # 모델이 Batch 내 이미지에 대해 caption을 생성하는 함수 호출
             image, 
             sample=False, 
             num_beams=config['num_beams'], 
@@ -129,6 +131,7 @@ def main(args, config):
         loggers.append(init_wandb_logger(config))
 
     # initialize distributed mode
+    # 분산 학습을 위한 Fabric 초기화
     fabric = L.Fabric(
         accelerator="cuda",
         devices=args.devices,
@@ -137,16 +140,17 @@ def main(args, config):
         loggers=loggers
     )
     fabric.launch()
-    utils.setup_for_distributed(is_master=fabric.is_global_zero)
+    utils.setup_for_distributed(is_master=fabric.is_global_zero) # 분산 환경에서의 설정 
     
     # setup useful variables
     world_size = fabric.world_size
     global_rank = fabric.global_rank
 
     # define gradient accumulation steps
+    # data에 따라 처리할 배치 사이즈를 조정
     E = config['batch_size_target']
     B = config['batch_size_train']
-    config['grad_acc_steps'] = (E // world_size) // B
+    config['grad_acc_steps'] = (E // world_size) // B # 몇 번째 step마다 optimizer.step()을 호출할지 결정
 
     # reproducibility settings
     L.seed_everything(args.seed)
@@ -160,6 +164,7 @@ def main(args, config):
         model = XVLMCaptioning(config=config)
         setattr(model, "name", "xvlm")
     elif args.model == "blip":
+        print("[Debug] captioning.py :BLIP 모델 객체 생성 -> blip_captioning.py로 이동")
         model = BLIPCaptioning(
             image_size=config['image_res'], 
             vit=config['vit'], 
@@ -172,16 +177,19 @@ def main(args, config):
         raise NotImplementedError(f"Model {args.model} not implemented!")
 
 
-    if not args.dense:
+    if not args.dense: # pruned 한 모델인 경우
+        print("[Debug] captioning.py : Pruned 모델")
+        #utils.prune_utils의 make_prunable 함수 호출 : 모델 파라미터에 pruning mask를 적용할 수 있도록 함
         make_prunable(model, pattern_lock=True, mask_on_the_fly=True)
         # if loading from a pretrained checkpoint after the 1st stage finetuning on the 4M data, it is assumed
         # that the state dict contains the pruning masks (xvlm only)
         if args.model == 'xvlm':
             masks_for_loading = args.mask if not args.load_capt_pretrain else None
         elif args.model == 'blip':
+            # pruning mask의 경로를 외부에서 지정한 경로로 사용(실행시 매개변수에 넣어줌)
             masks_for_loading = args.mask
         model.load_from_pruned_pretrained(args.pretraining_weights, masks_for_loading, config, args.load_capt_pretrain)
-    else:
+    else: # dense 한 모델인 경우
         model.load_pretrained(args.pretraining_weights, config, load_capt_pretrain=args.load_capt_pretrain)
         # dummy op, but useful to check that the sparsity is 0% with the upcoming lines
         make_prunable(model, pattern_lock=False, mask_on_the_fly=False)
@@ -194,7 +202,9 @@ def main(args, config):
     print(f"({100*remaining_params/prunable_params:.2f}%)")
     
     # datasets initialization
+    # 데이터셋 설정
     print("Creating COCO Caption dataset...")
+    print("[Debug] captioning.py : Dataset 불러옴 -> datasets/init.py create_data함수 호출")
     train_dataset, val_dataset, test_dataset = create_dataset('captioning', config)
 
     # (distributed) samplers initialization    
@@ -209,7 +219,10 @@ def main(args, config):
     
     # dataloaders initialization
     # NOTE: the collate function already embeds the tokenization process
+    # train_collate_fn(batch)으로 호출할 수 있도록 "단축 함수"를 정의한 것
+    # Batch를 넘겨주면 모델에 넣기 편한 형태로 변환하여 줌
     train_collate_fn = partial(coco_karpathy_train_collate_fn, tokenizer=model.tokenizer, max_tokens=config['max_tokens'])
+    
     train_loader, val_loader, test_loader = create_loader(
         datasets, 
         samplers,
@@ -220,13 +233,16 @@ def main(args, config):
     )
 
     # everything about data management is ready, so set it up with fabric
+    # 이미 생성해둔 dataloader를 fabric분산 환경에 맞게 설정
     train_loader, val_loader, test_loader = fabric.setup_dataloaders(train_loader, val_loader, test_loader, use_distributed_sampler=False)
     
     # optimizer initialization
+    # 옵티마이저 생성
     arg_opt = utils.AttrDict(config['optimizer'])
     optimizer = create_optimizer(arg_opt, model)
 
     # setup model and optimizer with fabric
+    # 모델과 옵티마이저를 fabric 분산 환경에 맞게 설정
     model, optimizer = fabric.setup(model, optimizer)
 
     # resume from a snapshot if existing
@@ -235,7 +251,8 @@ def main(args, config):
     start_epoch = 0
     start_time = time.time()
     sched_state_dict = None
-    if os.path.exists(args.snapshot):
+    if os.path.exists(args.snapshot): # 이미 저장된 snapshot이 있는 경우
+        # 마지막으로 실행된 시점의 상태를 불러옴
         restored_state = fabric.load(args.snapshot)
         model.load_state_dict(restored_state['model'])
         optimizer.load_state_dict(restored_state['optimizer'])
@@ -250,47 +267,50 @@ def main(args, config):
         )
     
     # learning rate scheduler initialization
-    arg_sche = utils.AttrDict(config['scheduler'])
-    steps_per_epoch = math.ceil(len(train_dataset) / config['batch_size_target'])
-    num_training_steps = steps_per_epoch * arg_sche['epochs']
-    num_warmup_steps = int(num_training_steps * arg_sche['num_warmup_steps'])
-    lr_scheduler = create_scheduler(
+    arg_sche = utils.AttrDict(config['scheduler']) # 스케줄러 설정 불러옴
+    steps_per_epoch = math.ceil(len(train_dataset) / config['batch_size_target']) # 한 epoch당 step 수
+    num_training_steps = steps_per_epoch * arg_sche['epochs'] # 전체 학습 step 수
+    num_warmup_steps = int(num_training_steps * arg_sche['num_warmup_steps']) # warmup step 수
+    lr_scheduler = create_scheduler( # 스케줄러 생성
         mode=arg_sche['sched'], 
         optimizer=optimizer, 
         num_warmup_steps=num_warmup_steps, 
         total_steps=num_training_steps, 
         last_epoch=-1 if sched_state_dict is None else sched_state_dict['last_epoch']-1 
     )
-    if sched_state_dict is not None:
-        lr_scheduler.load_state_dict(sched_state_dict)
+    if sched_state_dict is not None: # 이미 저장된 snapshot이 있는 경우
+        lr_scheduler.load_state_dict(sched_state_dict) # 스케줄러 상태 불러옴
 
     # start training! :) 
-    max_epoch = config['scheduler']['epochs']
+    max_epoch = config['scheduler']['epochs'] + 1
     for epoch in range(start_epoch, max_epoch):
         
         # needed to reshuffle the distribution of data among ranks epoch-wise
+        # 각 데이터 loader의 sampler에 epoch을 설정하여 매 epoch마다 데이터 분포를 재조정
         train_loader.sampler.set_epoch(epoch)
         val_loader.sampler.set_epoch(epoch)
         test_loader.sampler.set_epoch(epoch)
 
-        # one training epoch
-        train(model, train_loader, optimizer, lr_scheduler, epoch, fabric, config, debug_mode=args.debug)
+        # # one training epoch
+        # # 학습 시작
+        # train(model, train_loader, optimizer, lr_scheduler, epoch, fabric, config, debug_mode=args.debug)
 
-        # save model checkpoint after training for an epoch
-        state = {'model': model, 'optimizer': optimizer, 'scheduler': lr_scheduler.state_dict(), 
-                 'last_epoch': epoch, 'elapsed_time': time.time() - start_time}
-        fabric.save(path=args.snapshot, state=state)
+        # # save model checkpoint after training for an epoch
+        # state = {'model': model, 'optimizer': optimizer, 'scheduler': lr_scheduler.state_dict(), 
+        #          'last_epoch': epoch, 'elapsed_time': time.time() - start_time}
+        # fabric.save(path=args.snapshot, state=state) # training 후 snapshot 저장
 
         # evaluate the model
-        if epoch >= config['start_eval']:
+        if epoch >= config['start_eval']: # config['start_eval'] 이후에 평가 수행
 
             # generate captions for the validation set and the test sets
-            evaluation(args.result_dir, model, val_loader, epoch, fabric, config, split="val")
-            evaluation(args.result_dir, model, test_loader, epoch, fabric, config, split="test")
+            evaluation(args.result_dir, model, val_loader, epoch, fabric, config, split="val") # Validation 데이터 평가(Inference)
+            evaluation(args.result_dir, model, test_loader, epoch, fabric, config, split="test") # Test 데이터 평가(Inference)
 
             # merge the results from all ranks and clean up the json files (only on rank 0 to avoid locking issues)
             fabric.barrier()
             if fabric.is_global_zero:
+                # 분산 학습 환경에서 처리된 평가 결과를 합침
                 val_result_file = merge_eval_from_ranks(args.result_dir, epoch, fabric, split="val")
                 cleanup_eval(args.result_dir, epoch, fabric, split="val")
                 test_result_file = merge_eval_from_ranks(args.result_dir, epoch, fabric, split="test")
@@ -301,8 +321,10 @@ def main(args, config):
                 # This is useful if you want to evaluate the results on a different machine (my use case during development of the paper) 
                 # You are responsible for evaluating these files offline, using the function `coco_caption_eval` from evaltools/ic/__init__.py
                 if not args.skip_eval:
-                    coco_val = coco_caption_eval(config['val_gt_file'], val_result_file)
-                    coco_test = coco_caption_eval(config['test_gt_file'], test_result_file)
+                    print("[Debug] captioning.py : 평가 결과 Scoring 수행 -> evaltools/ic/__init__.py의 coco_caption_eval()함수 호출")
+                    
+                    coco_val = coco_caption_eval(config['val_gt_file'], val_result_file) # Validation 데이터 평가
+                    coco_test = coco_caption_eval(config['test_gt_file'], test_result_file) # Test 데이터 평가
 
                     log_stats = {**{f'val_{k}': round(v*100, 4) for k, v in coco_val.eval.items()},
                                 **{f'test_{k}': round(v*100, 4) for k, v in coco_test.eval.items()},
