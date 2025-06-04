@@ -282,7 +282,7 @@ def main(args, config):
         lr_scheduler.load_state_dict(sched_state_dict) # 스케줄러 상태 불러옴
 
     # start training! :) 
-    max_epoch = config['scheduler']['epochs'] + 1
+    max_epoch = config['scheduler']['epochs'] 
     for epoch in range(start_epoch, max_epoch):
         
         # needed to reshuffle the distribution of data among ranks epoch-wise
@@ -291,14 +291,14 @@ def main(args, config):
         val_loader.sampler.set_epoch(epoch)
         test_loader.sampler.set_epoch(epoch)
 
-        # # one training epoch
-        # # 학습 시작
-        # train(model, train_loader, optimizer, lr_scheduler, epoch, fabric, config, debug_mode=args.debug)
+        # one training epoch
+        # 학습 시작
+        train(model, train_loader, optimizer, lr_scheduler, epoch, fabric, config, debug_mode=args.debug)
 
-        # # save model checkpoint after training for an epoch
-        # state = {'model': model, 'optimizer': optimizer, 'scheduler': lr_scheduler.state_dict(), 
-        #          'last_epoch': epoch, 'elapsed_time': time.time() - start_time}
-        # fabric.save(path=args.snapshot, state=state) # training 후 snapshot 저장
+        # save model checkpoint after training for an epoch
+        state = {'model': model, 'optimizer': optimizer, 'scheduler': lr_scheduler.state_dict(), 
+                 'last_epoch': epoch, 'elapsed_time': time.time() - start_time}
+        fabric.save(path=args.snapshot, state=state) # training 후 snapshot 저장
 
         # evaluate the model
         if epoch >= config['start_eval']: # config['start_eval'] 이후에 평가 수행
