@@ -2,7 +2,7 @@ import time
 import datetime
 import torch
 from functools import partial
-
+import math
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
 from pruners.base import Pruner
 from pruners.accumulators import forward_output, region_forward_output
@@ -132,41 +132,43 @@ class MultiFlow(Pruner):
     #         score = score * param.abs() #출력 뉴런과 입력 뉴런의 Norm값의 외적 결과에 가중치 행렬의 절댓값을 곱하여 최종 중요도 점수를 계산한다.
     #         self.scores[id(param)] = torch.clone(score).detach().cpu()# 계산된 결과를 self.score에 clone하여 그래프 연결을 끊고, cpu로 이동시킨 후 딕셔너리에 저장
 
-    def score(self,
-          beta  = 5.0,      # tanh 기울기
-          gamma = 1.2,      # 최대 증·감폭 폭 → f ∈ [1-γ/2 , 1+γ/2]
-          lo    = 0.3,      # 하한 클램프 (안전)
-          hi    = 1.7):     # 상한 클램프
+    def score(self):
         """
-        • self.ref_scores: { param_name:{"score":tensor} } 형태로
-        Natural-이미지 기준 점수가 미리 로드돼 있어야 함.
-        • 변수 이름(importance_per_output 등)은 원본 그대로 유지.
+        • self.ref_scores : {param_name:{"score": tensor}}
         """
+
+        # ── tanh 스케일 하이퍼파라미터 (고정값) ──────────────
+        gamma          = 1.5  # 0.25~1.75        # 전체 폭 gamma : 1 → factor ∈ [0.5 , 1.5]
+        target_factor  = 1.5         # Δ = p95 지점에서 원하는 배율, 1.45 -> 1.5
+        delta_p95      = 1.015e-03    # |Δ| 95-percentile
+        beta           = math.atanh((target_factor - 1) / (gamma / 2)) / delta_p95
+        # τ0 = 0 (dead-zone 없음) ────────────────────────────
+
         for name, _, param in self.named_masked_parameters:
             pid = id(param)
 
-            # ---------- Multiflow 원본 점수 계산 ----------
+            # ---------- Multiflow 원본 점수 ----------
             actn_norm = torch.sqrt(self.actn_norms[pid]).to(param.device)
             importance_per_output = (param.abs() * actn_norm).mean(dim=1)
             importance_per_input  = (param.abs() * actn_norm).mean(dim=0)
 
             score = torch.outer(importance_per_output, importance_per_input)
-            score = score * param.abs()         # ← RS 원본 score
-            # ----------------------------------------------
+            score = score * param.abs()                  # RS 원본 score
+            # ------------------------------------------
 
-            # ---------- Δ 기반 tanh 스케일링 ---------------
+            # ---------- Δ 기반 tanh 스케일링 -----------
             if hasattr(self, "ref_scores") and name in self.ref_scores:
                 nat_score = self.ref_scores[name]["score"].to(score.device)
-                delta = score - nat_score                        # Δ = RS − Nat
+                delta     = score - nat_score            # Δ = RS − NAT
 
-                factor = 1 + 0.5 * gamma * torch.tanh(beta * delta) # f = 1 + 0.5γ tanh(βΔ)
-                factor  = torch.clamp(factor, min=lo, max=hi)   # 0.3-1.7 제한
+                # factor = 1 + γ/2 · tanh(β · Δ)   (τ0 = 0)
+                factor = 1. + (gamma / 2.) * torch.tanh(beta * delta)
 
-                score = score * factor                          # ← 보정 완료
-            # ----------------------------------------------
+                score = score * factor                  # 보정 완료
+            # ------------------------------------------
 
-            # ---------- 그대로 저장 ------------------------
-            self.scores[id(param)] = torch.clone(score).detach().cpu()
+            # ---------- 그대로 저장 --------------------
+            self.scores[pid] = torch.clone(score).detach().cpu()
  
 
     #입력 활성화 값을 관리하고 정규화(norm)을 계산하는 역할(모달리티 별로 처리)
