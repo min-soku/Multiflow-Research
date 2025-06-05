@@ -132,17 +132,18 @@ class MultiFlow(Pruner):
     #         score = score * param.abs() #출력 뉴런과 입력 뉴런의 Norm값의 외적 결과에 가중치 행렬의 절댓값을 곱하여 최종 중요도 점수를 계산한다.
     #         self.scores[id(param)] = torch.clone(score).detach().cpu()# 계산된 결과를 self.score에 clone하여 그래프 연결을 끊고, cpu로 이동시킨 후 딕셔너리에 저장
 
+    #score에 대해 scaling#
     def score(self):
         """
         • self.ref_scores : {param_name:{"score": tensor}}
         """
 
         # ── tanh 스케일 하이퍼파라미터 (고정값) ──────────────
-        gamma          = 1.5  # 0.25~1.75        # 전체 폭 gamma : 1 → factor ∈ [0.5 , 1.5]
-        target_factor  = 1.5         # Δ = p95 지점에서 원하는 배율, 1.45 -> 1.5
-        delta_p95      = 1.015e-03    # |Δ| 95-percentile
+        gamma          = 1  # 0.25~1.75        # 전체 폭 gamma : 1 → factor ∈ [0.5 , 1.5]
+        target_factor  = 1.45         # Δ = p95 지점에서 원하는 배율, 1.45 -> 1.5
+        delta_p95      = 2.19e-4    # Δ 95-percentile
         beta           = math.atanh((target_factor - 1) / (gamma / 2)) / delta_p95
-        # τ0 = 0 (dead-zone 없음) ────────────────────────────
+
 
         for name, _, param in self.named_masked_parameters:
             pid = id(param)
@@ -169,6 +170,53 @@ class MultiFlow(Pruner):
 
             # ---------- 그대로 저장 --------------------
             self.scores[pid] = torch.clone(score).detach().cpu()
+
+
+    #Input/weight/output 각각에 대해 scaling#
+    # def score(self):
+    #     # ── tanh 스케일 하이퍼파라미터 (고정값) ──────────────
+    #     gamma         = 1          # 전체 폭 γ : 1 → factor ∈ [0.5 , 1.5]
+    #     target_factor = 1.45       # Δ = p95 지점에서 원하는 배율
+    #     delta_p95     = 2.19e-4  # Δ 95-percentile
+    #     beta          = math.atanh((target_factor - 1) / (gamma / 2)) / delta_p95
+
+    #     for name, _, param in self.named_masked_parameters:
+    #         pid = id(param)
+
+    #         # ---------- Multiflow 원본 요소 ---------- #
+    #         actn_norm            = torch.sqrt(self.actn_norms[pid]).to(param.device)
+    #         importance_per_output = (param.abs() * actn_norm).mean(dim=1)        # (out_dim,)
+    #         importance_per_input  = (param.abs() * actn_norm).mean(dim=0)        # (in_dim,)
+    #         weight_abs            = param.abs()                                  # (out_dim, in_dim)
+    #         # ----------------------------------------- #
+
+    #         # ---------- Δ 기반 tanh 스케일링 ---------- #
+    #         if hasattr(self, "ref_scores") and name in self.ref_scores:
+    #             ref = self.ref_scores[name]
+
+    #             # Δ = RS − NAT
+    #             delta_out = importance_per_output - ref["imp_output"].to(param.device)
+    #             delta_in  = importance_per_input  - ref["imp_input"].to(param.device)
+    #             delta_w   = weight_abs            - ref["weight_abs"].to(param.device)
+
+    #             # factor = 1 + γ/2 · tanh(β · Δ)
+    #             factor_out = 1. + (gamma / 2.) * torch.tanh(beta * delta_out)    # (out_dim,)
+    #             factor_in  = 1. + (gamma / 2.) * torch.tanh(beta * delta_in)     # (in_dim,)
+    #             factor_w   = 1. + (gamma / 2.) * torch.tanh(beta * delta_w)      # (out_dim, in_dim)
+
+    #             # 요소별 보정
+    #             importance_per_output = importance_per_output * factor_out       # (out_dim,)
+    #             importance_per_input  = importance_per_input  * factor_in        # (in_dim,)
+    #             weight_abs            = weight_abs            * factor_w         # (out_dim, in_dim)
+    #         # ----------------------------------------- #
+
+    #         # ---------- 최종 score 산출 --------------- #
+    #         score = torch.outer(importance_per_output, importance_per_input)     # (out_dim, in_dim)
+    #         score = score * weight_abs                                           # 원소별 곱
+    #         # ----------------------------------------- #
+
+    #         # ---------- 그대로 저장 ------------------- #
+    #         self.scores[pid] = score.detach().cpu()
  
 
     #입력 활성화 값을 관리하고 정규화(norm)을 계산하는 역할(모달리티 별로 처리)
