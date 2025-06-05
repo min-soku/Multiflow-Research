@@ -80,7 +80,7 @@ class MultiFlow(Pruner):
 
             # get the modality threshold
             k = int(modal_scores.numel() * target_sparsity) #  modal_scores에 있는 파라미터 개수 * 목표 sparsity = Pruning할 파라미터 개수를 계산한다.
-            threshold, _ = torch.kthvalue(modal_scores, k=k) # k번째로 작은 값을 기준으로 임계값 설정(임계값으로 설정된 파라미터의 절댓값보다 작은 파라미터는 pruning 대상)
+            threshold, _ = torch.kthvalue(modal_scores, k=k) # k번째로 작은 값을 기준으로 임계값 설정(임계값으로 설정된 파라미터의 절댓값보다 작은 파라미터는 0으로 취급되어 pruning 목표 개수에 반영X)
             
             # compute the mask for the parameters of this modality
             for name, mask, param in self.named_masked_parameters:
